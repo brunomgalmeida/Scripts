@@ -1,0 +1,161 @@
+#!/bin/bash
+set -o errexit    # exit on error
+set -o pipefail   # pipe errors from pipped commands
+set -o errtrace   # trace ERR through 'time command' and other functions
+
+verbose=false
+
+# When someone decides to stop the script - killall children
+cleanup () {
+    log "executing cleanup on exit..."
+    pgrep -P $$ | xargs -i kill {} || true
+    killall -q $( basename $receivewal ) || true
+    exit 0
+}
+trap cleanup SIGHUP SIGINT SIGTERM
+
+function log {
+    if $verbose; then
+        printf "`date --rfc-3339=s`: $@\n"
+    fi
+}
+
+function usage {
+    printf "Usage: $0 PGDATA DESTINATION [arguments]"
+    printf "\n\nArguments:"
+    printf "\n\t-v, --verbose\t\tverbose"
+    printf "\n"
+}
+
+if [ $# -lt 1 ]; then
+    usage
+    exit 1
+fi
+
+exec 3<&1 		# copy file description 1
+exec 1<> /dev/null	# send all std to /dev/null
+
+if [[ "${@}" =~ "-v" ]]; then
+    verbose=true
+	exec 1>&3
+	log "Script starting"
+fi
+
+export PGDATA=$1
+# Try to get the pgport from the running instance
+export PGPORT=`sed -n 4p $PGDATA/postmaster.pid 2>/dev/null`
+export DEST=$2
+export PGOPTIONS="$PGOPTIONS --client-min-messages=warning"
+
+if [ -z $PGPORT ]; then
+    printf "Could not find postmaster.pid. Is the db started on '$PGDATA'?\n"
+    exit 2
+fi
+
+# Unset variables that can cause problem connecting to the database
+unset PGHOSTNAME
+unset PGHOST
+unset PGDATABASE
+unset PGUSER
+unset PGPASS
+
+# Set the number of cores
+# ncores=4
+# method='--fast'
+
+pg_version=`psql -Atc "show server_version_num"`
+
+receivewal='pg_receivexlog'
+pg_wal="pg_xlog"
+
+#psql -Atc "show log_directory;"
+pg_log=$( psql -Atc "select setting from pg_settings where name = 'log_directory';" )
+if [ $pg_version -ge 100000 ]; then
+    pg_wal='pg_wal'
+    receivewal='pg_receivewal'
+fi
+
+# TODO: old versions of tar do not allow to pass --fast via the -I arg
+APP="`which pigz || which gzip`"
+PGRECEIVE=`which $receivewal`
+
+if [ -z $PGRECEIVE ]; then
+    PGRECEIVE=/opt/postgres/bin/$receivewal
+fi
+
+#statements
+if [ -d "$DEST" ]; then
+    echo "Destination path already exists, aborting"
+    exit 1
+fi
+
+# Check if the wal level is good
+# NOTE: wal_level does not exists in postgres 8.4
+wal_level=`psql -Atc "show wal_level"`
+pg_version=`psql -Atc "show server_version_num"`
+
+mkdir -p "$DEST"/$pg_wal
+
+if ! [ $pg_version -gt 90000 ] && [[ "archive hot_standby logical" =~ "$wal_level" ]]; then
+    log "Cannot continue due to wal_level $wal_level"
+    exit 1
+fi
+
+# Stop the backup ifs already running
+if [ -e $PGDATA/backup_label ]; then
+    # We dont care about the output of this command
+    log 'A backup is already running, stopping it'
+    psql -Atqc "select pg_stop_backup()"
+fi
+
+log "Start the process to stream the WAL logs"
+$PGRECEIVE -D $DEST/$pg_wal --status-interval=1 &
+pid=$!
+sleep 1
+if ! [ -f /proc/$pid/exe ]; then
+    # The pg_receivexlog process didnt start correctly
+    # Show the error messages and  terminate this script
+    log "Failed with errors";
+    #kill $pid
+    exit 1
+fi
+#disown %%
+#PGOPTIONS='--client-min-messages=warning' psql -X -q -a -1 -v ON_ERROR_STOP=1 --pset pager=off -d mydb -f script.sql
+
+# Global options for the TAR command
+# http://www.gnu.org/software/tar/manual/html_node/warnings.html
+tar_options="--warning=no-file-changed --warning=no-file-removed --preserve-permissions --create"
+
+# Send the instruction to start the database backup
+log "Start backup of $PGDATA"
+psql -Atqc "select pg_start_backup('fast_backup',true)"
+
+# Start compressing the $PGDATA directory excluding logs
+# the filal part with "|| [[ $? -eq 1 ]]" is for some special cases,
+#     see: http://stackoverflow.com/questions/20318852/tar-file-changed-as-we-read-it
+tar -I "$APP" $tar_options -C "$PGDATA" --file "$DEST"/base.tgz . \
+			--exclude $pg_wal --exclude $pg_log --exclude postmaster.pid || [[ $? -eq 1 ]]
+
+# Send the instruction to stop the running backup
+log 'Issuing command to stop the backup'
+psql -Atqc "select pg_stop_backup()"
+
+# Is the stop_backup instruction failed with errors then exit
+if [ $? -ne 0 ]; then
+    log 'Failed with errors'
+else
+    # Wait for 2s to ensure all xlogs are received
+    sleep 2;
+    pkill $( basename $receivewal ) || [[ 1 -eq 1 ]]
+    # Delete a partial file that always gets created
+    # rm -f $DEST/$pg_wal/*.partial
+    # Compress the created $pg_wal folder
+    log "Compressing $PGDATA directory"
+    tar -I "$APP" $tar_options -C "$DEST" --file "$DEST"/$pg_wal.tgz $pg_wal --remove || [[ $? -eq 1 ]]
+fi
+
+# pkill $receivewal || [[ 1 -eq 1 ]]
+
+log 'Complete'
+#kill $pid
+#killall $receivewal
