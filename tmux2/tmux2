@@ -1,0 +1,38 @@
+#!/bin/bash
+args=( "$@" )
+
+cmd=${args:0}
+
+if [[ $# -lt 1 ]]; then
+    printf "Usage:"
+    printf "\n    $0 cmd host(s)\n"
+    printf "\n   cmd \t\tCommand to execute in all tmux sessions. Default ssh"
+    printf "\n   hosts \tList of hosts/parameter to pass to the command"
+    printf "\n\nExample:"
+    printf "\n    $0 ssh host1, host2 host3"
+    printf "\n    $0 psql postgresql://localhost postgresql://localhost:6432, postgresql://localhost:6453"
+    printf "\n\n"
+    exit 1
+fi
+
+# Remove the command from the array list of arguments
+unset args[0];
+# printf "${args[*]}\n"
+
+rawhosts=$( printf "${args[*]}" | tr ',' ' ' )
+hosts=( $rawhosts )
+name="${cmd}-`cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 4`"
+
+tmux new-session -s "$name" -n "${cmd}" -d
+#tmux send-keys "${cmd} ${hosts[0]}" ENTER
+tmux send-keys "${cmd} ${hosts[0]}"
+unset hosts[0];
+for h in "${hosts[@]}"; do
+    #tmux split-window -h  "${cmd} $h" ENTER
+    tmux split-window -h
+    tmux send-keys "${cmd} $h"
+    tmux select-layout tiled > /dev/null
+done
+tmux select-pane -t 0
+tmux set-window-option synchronize-panes on > /dev/null
+tmux a -t ${name}

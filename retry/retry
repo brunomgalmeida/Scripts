@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# https://unix.stackexchange.com/questions/82598/how-do-i-write-a-retry-logic-in-script-to-keep-retrying-to-run-it-upto-5-times
+# https://www.commandlinefu.com/commands/view/12327/retry-the-previous-command-until-it-exits-successfully
+
+# If argument in position 1 is a number and in position 2 is also a number then we have a case of
+# $ `retry attempts interval`
+# Otherwise we have
+# $ `retry attempts`
+# where the interval defaults to 1
+
+n=0
+try=$1
+sleep=1
+if [[ $2 =~ ^-?[0-9]+$ ]] ; then
+    # retry and timeout passed
+    sleep=$2
+    cmd="${@: 3}"
+else
+    cmd="${@: 2}"
+fi
+
+# Check arguments count
+[[ $# -le 1 ]] && {
+    echo -e "Usage: \n\t$0 retries [sleep=1] command ...";
+    echo -e "\n\nExample: \n\t$0 1 5 ls -la";
+    exit 1
+}
+
+until [[ $n -ge $try ]]; do
+    $cmd && break || {
+            ((n++))
+            printf "Command failed, waiting ${sleep}s. "
+            sleep $sleep;
+            printf "Try $n/${try}\n"
+        }
+done
+
+if [ $n -eq $try ]; then
+    echo "Failed to execute command '$cmd' after $try tries."
+    exit 1
+fi
