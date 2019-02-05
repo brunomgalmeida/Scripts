@@ -1,0 +1,48 @@
+#!/bin/bash
+set -o errexit    # exit on error
+set -o pipefail   # pipe errors from pipped commands
+set -o nounset    # exit if found unset variables
+
+# Source: https://unix.stackexchange.com/questions/83962/tail-f-the-most-recent-log-file
+# http://jensd.be/248/linux/use-inotify-tools-on-centos-7-or-rhel-7-to-watch-files-and-directories-for-events
+# https://www.ibm.com/developerworks/library/l-ubuntu-inotify/index.html
+# https://github.com/rvoicilas/inotify-tools/wiki
+
+# When someone decides to stop the script - killall children
+cleanup () {
+    pgrep -P $$ | xargs -i kill {}
+    pgrep 'inotifywait' | xargs -i kill -q {}
+    exit
+}
+
+trap cleanup SIGHUP SIGINT SIGTERM SIGSTOP # EXIT ???
+
+if [ -z `which inotifywait` ]; then
+    echo "This script required inotify-tools"
+    echo "Try installing with: sudo apt-get install inotify-tools"
+    exit 1
+fi
+
+
+dir=${1:-`pwd`}
+tpid=-1
+
+tailnfail () {
+    # Process that will monitor if the tail was killed
+    #   and if thats the case terminate the whole application
+    # in summary: while exists a pid for the tail, wait!
+    while kill -0 $tpid 2>/dev/null ; do
+        sleep 1
+    done
+    cleanup
+}
+
+while true; do
+    tail -qF ${dir}/* &
+    tpid=$!
+    tailnfail &
+    inotifywait -qq -e create ${dir}
+    kill $! $tpid
+done
+
+# alias p='ps aux | grep -P "(tail|taildir|inotifywait)"'
