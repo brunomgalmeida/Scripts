@@ -1,0 +1,48 @@
+#!/bin/bash
+
+# alias scp='scp_wrapper'
+# Encrypt: printf "password" | gpg -c | base64 -w 0
+# Decrypt: printf "jA0ECQMCpgfs205Ngmr/0j0BZ9zL9Z+3F18oK74vN/rJehoAhRAfRcc9r8WU8SpukRGsDJEMdi3BxPeR7APXZq412r79aYnDCFIXIzwg" | base64 -d | gpg -d -q
+
+#https://askubuntu.com/questions/87956/can-you-set-passwords-in-ssh-config-to-allow-automatic-login
+
+DefaultPassword=$( sed -rn "s/^#DefaultPassword (.*)/\1/p"  ~/.ssh/config )
+
+password=$(awk '
+BEGIN {
+    # Collect the SSH arguments as keys of a dictionary, so that we can easily
+    # check for inclusion.
+    for (i = 2; i < ARGC; i++) {
+        sshArgs[ARGV[i]] = 1
+    }
+    # Only process the first argument; all others are the command-line arguments
+    # given to ssh.
+    ARGC = 2
+}
+# $1 == "#Password" && inhost { print $2 }               # << original that wont read spaces
+$1 == "#Password" && inhost { {for(i=2;i<=NF;i+=1) { if (i > 2) printf " "; printf $i }} }
+/^\s*Host\s/ {
+    if ($2 in sshArgs)
+        inhost=1
+    else
+        inhost=0
+}' ~/.ssh/config "$@")
+
+# if [ "$password" ]; then
+#     password=$( printf "$password" | base64 -d | gpg -d -q )
+#     # echo  "sshpass -p '$password' ssh $@"
+#     sshpass -p "$password" ssh "$@"
+# else
+#     ssh "$@"
+# fi
+# kpcli --readonly --kdb work --command "show -f work/balmeida"
+
+# If there is a local password, use it instead
+decode=${password:-$DefaultPassword}
+
+if [ "$decode" ]; then
+    passw=$( printf "$decode" | base64 -d | gpg -d -q )
+    passh -c1 -p "$passw" scp "$@"
+else
+    ssh "$@"
+fi
