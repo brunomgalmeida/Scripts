@@ -72,8 +72,22 @@ decode=${p:-$( getPass 0 )}
 
 # IF gpg-agent version >2, whe should use gpg2
 # https://unix.stackexchange.com/questions/231386/how-to-make-gpg-find-gpg-agent
+
+# Defaults to gpg2 if found
+gpg=$( which gpg2 )
+
+if [ -z $gpg ]; then
+    # Could not find gpg2, then use gpg
+    gpg=$( which gpg )
+fi
+
+if [ -z $gpg ]; then
+    printf "gpg not found. Exiting...\n"
+    exit 1
+fi
+
 if [ "$decode" ]; then
-    passw=$( printf "$decode" | base64 -d | gpg -d -q )
+    passw=$( printf "$decode" | base64 -d | $gpg -d -q )
     passh -c1 -p "$passw" ssh "$@"
 else
     ssh "$@"
