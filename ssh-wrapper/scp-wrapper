@@ -6,43 +6,82 @@
 
 #https://askubuntu.com/questions/87956/can-you-set-passwords-in-ssh-config-to-allow-automatic-login
 
-DefaultPassword=$( sed -rn "s/^#DefaultPassword (.*)/\1/p"  ~/.ssh/config )
-
-password=$(awk '
-BEGIN {
-    # Collect the SSH arguments as keys of a dictionary, so that we can easily
-    # check for inclusion.
-    for (i = 2; i < ARGC; i++) {
-        sshArgs[ARGV[i]] = 1
-    }
-    # Only process the first argument; all others are the command-line arguments
-    # given to ssh.
-    ARGC = 2
+function getPass () {
+    # Read a list of passwords int he format `#Password[0-9]=passwordhere` from the $USER ssh config file
+    OIFS=$IFS; IFS=';'
+    PASSWORD_LIST=$( sed -rn "s/^\s*#\s*(Password[0-9])\s+=\s+(.*)/\1 \2/p"  ~/.ssh/config )
+    IFS=$OIFS
+    echo "$PASSWORD_LIST" | grep "Password$1" | awk -F ' ' '{ print $2 }'
 }
-# $1 == "#Password" && inhost { print $2 }               # << original that wont read spaces
-$1 == "#Password" && inhost { {for(i=2;i<=NF;i+=1) { if (i > 2) printf " "; printf $i }} }
+
+#TODO How to extract password from ssh config inheritance
+
+# Extract the value that follows the text '#Password '
+password=$(awk 'BEGIN {
+    # Collect the SSH arguments as keys of a dictionary, so that we can easily check for inclusion.
+    for (i = 2; i < ARGC; i++) {
+        # Ignore arguments that start with - as there are most likely options
+        if (! match (ARGV[i], /^-/ ) ){
+            sshArgs[ARGV[i]] = ARGV[i]
+            # printf ">>ARG=%s\n", ARGV[i]                          # DEBUG - show parsed values
+        }
+    }
+    # Only process the first argument; all others are the command-line arguments given to ssh.
+    ARGC = 2
+    # for (key in sshArgs) { print sshArgs[key] }                   # DEBUG - show all values in array
+}
+$1 == "#Password" && inhost {
+    for(i=2;i<=NF;i+=1) {
+        if (i > 2)
+            printf ""
+        else
+            printf $i
+    }
+}
 /^\s*Host\s/ {
-    if ($2 in sshArgs)
-        inhost=1
-    else
-        inhost=0
+    for (key in sshArgs) {                                          # For every entry in sshArgs
+        #printf ">> Checking line %s\n", $0                          # DEBUG - show the host that we are working with
+        split($0, hosts)                                            # Store in the variable host all the alias, split by space
+        # for (key in hosts) { print hosts[key] }
+        for (h in hosts){                                           # For every alias in the Host
+            p#rintf ">> Comparing %s with %s\n", hosts[h], key       # DEBUG - Show what is being compared
+            if ( key ~ hosts[h] ){
+                #printf ">> MATCH FOUND on line %s\n", $0            # DEBUG - display the entries that match
+                inhost=1
+            } else{
+                inhost=0
+            }
+        }
+    }
 }' ~/.ssh/config "$@")
 
-# if [ "$password" ]; then
-#     password=$( printf "$password" | base64 -d | gpg -d -q )
-#     # echo  "sshpass -p '$password' ssh $@"
-#     sshpass -p "$password" ssh "$@"
-# else
-#     ssh "$@"
-# fi
-# kpcli --readonly --kdb work --command "show -f work/balmeida"
+# To test the command above, simply copy from AWK onwards and add `~/.ssh/config ssh coral-prod --list --help` to the end
 
-# If there is a local password, use it instead
-decode=${password:-$DefaultPassword}
+# If the password is a single digit, then fetch the Password$ID, otherwise use the value returned from the parsing
+[[ $password =~ [0-9]{1} ]] && p=$( getPass $password ) || p=$password
+
+# Check if there is a local password ($p), if not defaults to Password0
+decode=${p:-$( getPass 0 )}
+
+# IF gpg-agent version >2, whe should use gpg2
+# https://unix.stackexchange.com/questions/231386/how-to-make-gpg-find-gpg-agent
+
+# Defaults to gpg2 if found
+gpg=$( which gpg2 )
+
+if [ -z $gpg ]; then
+    # Could not find gpg2, then use gpg
+    gpg=$( which gpg )
+fi
+
+if [ -z $gpg ]; then
+    printf "gpg not found. Exiting...\n"
+    exit 1
+fi
 
 if [ "$decode" ]; then
-    passw=$( printf "$decode" | base64 -d | gpg -d -q )
+    passw=$( printf "$decode" | base64 -d | $gpg -d -q )
     passh -c1 -p "$passw" scp "$@"
 else
-    ssh "$@"
+    scp "$@"
 fi
