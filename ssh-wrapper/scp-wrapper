@@ -17,43 +17,78 @@ function getPass () {
 #TODO How to extract password from ssh config inheritance
 
 # Extract the value that follows the text '#Password '
-password=$(awk 'BEGIN {
+password=$(awk '
+function debug(level , msg) {
+    if (level<=vlevel) print "awk:", msg > "/dev/stderr";
+};
+
+BEGIN {
     # Collect the SSH arguments as keys of a dictionary, so that we can easily check for inclusion.
     for (i = 2; i < ARGC; i++) {
+
+        if (ARGV[i] ~ "-[v]+" ){
+            #TODO count the number of vs, and add verbosity levels based on that
+            vlevel=1;
+            debug(3, "Debug enabled") ;
+        }
+
         # Ignore arguments that start with - as there are most likely options
         if (! match (ARGV[i], /^-/ ) ){
             sshArgs[ARGV[i]] = ARGV[i]
-            # printf ">>ARG=%s\n", ARGV[i]                          # DEBUG - show parsed values
+            debug(3, "ARG=" ARGV[i]);
         }
     }
     # Only process the first argument; all others are the command-line arguments given to ssh.
     ARGC = 2
-    # for (key in sshArgs) { print sshArgs[key] }                   # DEBUG - show all values in array
+    # show all values in array: for (key in sshArgs) { print sshArgs[key] }
 }
 $1 == "#Password" && inhost {
+    # Look for the LAST instance of the pasword that matches this line
+    pass = ""
     for(i=2;i<=NF;i+=1) {
-        if (i > 2)
-            printf ""
-        else
-            printf $i
+        if (i >= 2){
+            debug(1, "FOUND PASSWORD with value = " $i)
+            pass=$i
+            inhost=0
+            break
+        }
     }
+    # printf pass
+    # Enable the next line to stop parsing at the first instance of password found
+    # exit pass
 }
 /^\s*Host\s/ {
-    for (key in sshArgs) {                                          # For every entry in sshArgs
-        #printf ">> Checking line %s\n", $0                          # DEBUG - show the host that we are working with
-        split($0, hosts)                                            # Store in the variable host all the alias, split by space
+    for (key in sshArgs) {                                                                          # For every entry in sshArgs
+        # show the host that we are working with
+        debug(2, "Checking line " $0);
+
+        split($0, hosts)                                                                            # Store in the variable host all the alias, split by space
         # for (key in hosts) { print hosts[key] }
-        for (h in hosts){                                           # For every alias in the Host
-            p#rintf ">> Comparing %s with %s\n", hosts[h], key       # DEBUG - Show what is being compared
+        for (h in hosts){                                                                           # For every alias in the Host
+            if (hosts[h] == "Host") {
+                debug(3, "ignoring key (" hosts[h] ")");
+                continue;
+            }
+
+            # debug("Comparing (" key ") with (" hosts[h] ")");
             if ( key ~ hosts[h] ){
-                #printf ">> MATCH FOUND on line %s\n", $0            # DEBUG - display the entries that match
+                 # display the whole line entries that match
+                debug(1, "FOUND MATCH on line (" $0 ")");
                 inhost=1
-            } else{
+                break
+            } else {
                 inhost=0
             }
         }
     }
-}' ~/.ssh/config "$@")
+}
+
+# At the end of the script, ouput the value of variable pass
+END {
+    debug(1, "Using password " pass);
+    print pass
+}
+' ~/.ssh/config "$@")
 
 # To test the command above, simply copy from AWK onwards and add `~/.ssh/config ssh coral-prod --list --help` to the end
 
