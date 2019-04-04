@@ -4,7 +4,8 @@
 # Encrypt: printf "password" | gpg -c | base64 -w 0
 # Decrypt: printf "jA0ECQMCpgfs205Ngmr/0j0BZ9zL9Z+3F18oK74vN/rJehoAhRAfRcc9r8WU8SpukRGsDJEMdi3BxPeR7APXZq412r79aYnDCFIXIzwg" | base64 -d | gpg -d -q
 
-#https://askubuntu.com/questions/87956/can-you-set-passwords-in-ssh-config-to-allow-automatic-login
+# https://unix.stackexchange.com/questions/278284/why-does-scp-fail-when-requesttty-force-option-is-enabled
+# https://askubuntu.com/questions/87956/can-you-set-passwords-in-ssh-config-to-allow-automatic-login
 
 function getPass () {
     # Read a list of passwords int he format `#Password[0-9]=passwordhere` from the $USER ssh config file
@@ -117,7 +118,7 @@ gpg=$( which gpg )
 
 if [ "$decode" ]; then
     passw=$( printf "$decode" | base64 -d | $gpg -d -q )
-    passh -c1 -p "$passw" scp "$@"
+    passh -c1 -p "$passw" scp -o RequestTTY=no "$@"
 else
-    scp "$@"
+    scp -o RequestTTY=no "$@"
 fi
