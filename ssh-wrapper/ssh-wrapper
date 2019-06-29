@@ -51,7 +51,7 @@ $1 == "#Password" && inhost {
         split($0, hosts)                                            # Store in the variable host all the alias, split by space
         # for (key in hosts) { print hosts[key] }
         for (h in hosts){                                           # For every alias in the Host
-            p#rintf ">> Comparing %s with %s\n", hosts[h], key       # DEBUG - Show what is being compared
+            #printf ">> Comparing %s with %s\n", hosts[h], key       # DEBUG - Show what is being compared
             if ( key ~ hosts[h] ){
                 #printf ">> MATCH FOUND on line %s\n", $0            # DEBUG - display the entries that match
                 inhost=1
