@@ -1,5 +1,10 @@
 #!/bin/bash
 
+set -o errexit    # exit on error
+set -o pipefail   # pipe errors from pipped commands
+set -o nounset    # exit if found unused variables
+set -o errtrace   # trace ERR through 'time command' and other functions
+
 # Install passh
 # curl -k https://raw.githubusercontent.com/brunomgalmeida/passh/master/passh.c >passh.c
 # gcc passh.c -o passh && chmod +x passh && sudo mv passh /usr/local/bin && rm passh.c
@@ -26,7 +31,7 @@ function getPass () {
 # Extract the value that follows the text '#Password '
 password=$(awk '
 function debug(level , msg) {
-    if (level<=vlevel) print "awk:", msg > "/dev/stderr";
+    if (level<=vlevel) print level, "awk:", msg > "/dev/stderr";
 };
 
 BEGIN {
@@ -35,7 +40,7 @@ BEGIN {
 
         if (ARGV[i] ~ "-[v]+" ){
             #TODO count the number of vs, and add verbosity levels based on that
-            vlevel=1;
+            vlevel=0;
             debug(3, "Debug enabled") ;
         }
 
@@ -71,19 +76,14 @@ $1 == "#Password" && inhost {
 
         split($0, hosts)                                                                            # Store in the variable host all the alias, split by space
         # for (key in hosts) { print hosts[key] }
-<<<<<<< HEAD
-        for (h in hosts){                                           # For every alias in the Host
-            #printf ">> Comparing %s with %s\n", hosts[h], key       # DEBUG - Show what is being compared
-=======
         for (h in hosts){                                                                           # For every alias in the Host
             if (hosts[h] == "Host") {
                 debug(3, "ignoring key (" hosts[h] ")");
                 continue;
             }
 
-            # debug("Comparing (" key ") with (" hosts[h] ")");
->>>>>>> b2cedd769cf31af2caff4a1daafeed4ac3593cf4
-            if ( key ~ hosts[h] ){
+            debug(4,"Comparing (" key ") with (" hosts[h] ")");
+            if ( hosts[h] ~ key ){
                  # display the whole line entries that match
                 debug(1, "FOUND MATCH on line (" $0 ")");
                 inhost=1
@@ -98,7 +98,9 @@ $1 == "#Password" && inhost {
 # At the end of the script, ouput the value of variable pass
 END {
     debug(1, "Using password " pass);
-    print pass
+    if (length(pass) > 0) {
+	print pass
+    }
 }
 ' ~/.ssh/config "$@")
 
@@ -114,7 +116,7 @@ decode=${p:-$( getPass 0 )}
 # https://unix.stackexchange.com/questions/231386/how-to-make-gpg-find-gpg-agent
 
 # Defaults to gpg if found
-gpg=$( which gpg )
+gpg=$( which gpg2 )
 
 # TODO Using gpg2 causes other type of problems, disabling it until I can work out what is wrong
 # if [ -z $gpg ]; then
@@ -126,10 +128,13 @@ gpg=$( which gpg )
 #     printf "gpg not found. Exiting...\n"
 #     exit 1
 # fi
+#set +H # Disable ! style history substitution
 
 if [ "$decode" ]; then
     passw=$( printf "$decode" | base64 -d | $gpg -d -q )
-    passh -c1 -p "$passw" ssh "$@"
+    passh -c1 -p "${passw}" ssh "$@"
 else
     ssh "$@"
 fi
+#set -H
+
