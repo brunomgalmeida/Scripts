@@ -7,7 +7,7 @@ set -o errtrace   # trace ERR through 'time command' and other functions
 
 # Install passh
 # curl -k https://raw.githubusercontent.com/brunomgalmeida/passh/master/passh.c >passh.c
-# gcc passh.c -o passh && chmod +x passh && sudo mv passh /usr/local/bin && rm passh.c
+# cc passh.c -o passh && chmod +x passh && sudo mv passh /usr/local/bin && rm passh.c
 
 # alias ssh='ssh_wrapper'
 # Encrypt: printf "password" | gpg -c | base64 -w 0
